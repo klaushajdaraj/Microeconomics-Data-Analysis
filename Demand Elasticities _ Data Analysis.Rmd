@@ -1,0 +1,560 @@
+---
+title: "Microeconomics_Data Analysis_Klaus Hajdaraj"
+author: "Klaus Hajdaraj"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Assignment | Applied Microeconomics 1
+
+Libraries and setup used for this assignment.
+
+```{r setup, include=TRUE, warning = FALSE, message = FALSE}
+
+#install.packages("tinytex")
+#tinytex::install_tinytex()
+library(knitr)
+library(dplyr)
+library(tidyr)
+library(haven)
+library(data.table)
+library(ggplot2)
+library(fixest)
+library(patchwork)
+library(ggpubr)
+library(hrbrthemes)
+library(AER)
+
+#setwd("/Users/Klaus/Desktop/Micro Project")
+data = haven::read_dta("wber final5.dta")
+setDT(data)
+```
+
+## Exercise 1
+
+In this section, we will calculate the total revenue observed in the data for each brand and product. In the next step we will determine the brand and the product with the largest total revenue in data.
+First, let's have a look to the data in order to understand better its structure and the variables we will deal with.
+
+```{r, include = TRUE}
+data <- as.data.frame(data)
+dim(data)
+```
+Our dataset contains 1,866,949 observations and 10 variables.
+In order to understand better the variables, we can look at the table shown below.
+Our variables are: Store, UPC (Unique Product Code), Week, Sales, Price, Margin, Brand, City, Zip and Unemployment.
+
+```{r, include = TRUE}
+head(data)
+```
+
+We will proceed to group our data based on UPC. Then we will create and assign a new variable called total_revenue, which will contain the Total Revenue for each UPC.
+In the next step, we will find the UPC with the highest Total Revenue.
+The UPC with the highest Total Revenue is : 3410057306 with a Total Revenue equal to $6,539,291.
+
+```{r, include = TRUE}
+## Group by upc
+by_upc <- data %>%
+  group_by(upc)
+
+# Create new column: total_revenue = Sales * Price
+by_upc$total_revenue <- by_upc$Sales  * by_upc$Price
+head(by_upc$total_revenue)
+
+# Total Revenue for each UPC group: The sum of Sales * Price
+TR_byUPC <- by_upc %>%
+  summarise(TR = sum(total_revenue))
+TR_byUPC <- as.data.frame(TR_byUPC)
+
+# The upc with the highest Total Revenue
+head(arrange(TR_byUPC, desc(TR))) # upc : 3410057306
+                                  # Total Revenue: 6539291
+```
+
+In the following section we will repeat the same process in order to find the brand with the highest Total Revenue.
+In the result, we found out that P_MILLER_GENUINE_DRAFT is the brand with the largest Total Revenue of $9,227,290 .
+
+```{r, include=TRUE}
+## Group by brand
+by_brand <- data %>%
+  group_by(brand)
+
+# Create new column: total_revenue = Sales * Price
+by_brand$total_revenue <- by_brand$Sales  * by_brand$Price 
+
+# Total Revenue for each UPC group: The sum of Sales * Price
+TR_byBrand <- by_brand %>%
+  group_by(brand) %>%
+  summarise(TR = sum(total_revenue))
+TR_byBrand <- as.data.frame(TR_byBrand)
+
+# The brand with the highest Total Revenue
+head(arrange(TR_byBrand, desc(TR))) # brand: P_MILLER_GENUINE_DRAFT
+                                    # Total Revenue: 9227290
+```
+
+### Task 1.A
+
+After we found the product and brand with the largest total revenue, we will create a scatter plot of Prices against Sales. Then using the ggplot2 package of R, we can fit a straight and a quadratic line into the data shown in the graph.
+
+```{r, include=TRUE}
+# Scatterplot the brand and fitting the quadratic regression line
+ggplot(subset(data, brand == "P_MILLER_GENUINE_DRAFT"), aes(x = Sales, y = Price)) + geom_point() + 
+geom_smooth(method='lm', formula= y~x) + 
+geom_smooth(method='lm', formula=y~x+I(x^2)) + 
+ggtitle("Plot of Price vs Sales for the Brand")
+```
+
+```{r, include=TRUE}
+# Scatterplot for the upc and fitting linear and quadratic regression line
+ggplot(subset(data, upc == 3410057306), aes(x = Sales, y = Price)) + 
+geom_point() + 
+geom_smooth(method='lm', formula= y~x) + 
+geom_smooth(method='lm', formula= y~x+I(x^2)) +
+ggtitle("Plot of Price vs Sales for the UPC")
+```
+
+### Task 1.B
+
+After plotting the graphs for the brand and the UPC, we can distinguish a difference between two graphs. The main difference stands on the distribution of the observations and, the fitted linear and quadratic line. 
+The linear fitted line on the graph for the brand suggests that there is a positive linear relationship between sales and prices. In our case, this is not a positive indicator because it does not respect the definition of law of demand.
+The law of demand states that when price of a good increases, demand of the good will decrease. 
+In the second graph, the fitted line suggest that there is a negative linear relationship between sales and price. This graph correctly illustrates the definition of the law of demand. In this case, the linear line is the demand curve for the UPC with the highest TR.
+
+Since we did our analysis based on brand and UPC with the highest TR, we can understand better the difference between two cases.
+One of the reasons for the difference could be the lack of an adequate substitute for the brand. Often, in the brand level, for example in the luxury brands and goods, consumers do not strongly react to an increase on price. When it comes to the variety within the brand, consumers have many product variation to choose, so they can easily adjust they behavior and preferences when the prices change.
+
+### Task 1.C
+
+In this section, we will try to find the brand with the most observations at the product level.
+As the result, we found that P_MILLER_GENUINE_DRAFT is the brand with the most sold units of product, by 105.762 units.
+
+```{r, include=TRUE}
+# Let's find the brand with the most observations
+brands_size <- data %>%
+                group_by(brand) %>%
+                count(brand, sort = TRUE)
+head(brands_size) # P_MILLER_GENUINE_DRAFT has the most observations
+                  # 105762 observations
+
+# Store the data for the biggest brand in order to use it in the further tasks
+big_brand <- subset(by_brand, brand == "P_MILLER_GENUINE_DRAFT")
+big_brand <- as.data.frame(big_brand)
+```
+
+After finding the brand with the most observations, we will demean its Prices and Sales.
+In the code chunk, as described to each of the comments, first we will find the mean for each upc included to this brand.
+
+```{r, include=TRUE}
+# Find the mean for each upc
+avgs <- big_brand %>%
+          select(Price, Sales, upc) %>%
+          group_by(upc) %>%
+          mutate(avg_price = mean(Price, na.rm = TRUE), avg_sales = mean(Sales, na.rm = TRUE))
+
+# Convert to data frame
+avgs <- as.data.frame(avgs)
+
+# Demean the data by: actual_value - mean_value
+demean_bigBrand <- big_brand
+
+# Demean Sales
+demean_bigBrand$Sales <- demean_bigBrand$Sales - avgs$avg_sales
+
+# Demean Price
+demean_bigBrand$Price <- demean_bigBrand$Price - avgs$avg_price
+```
+
+Let's plot the demeaned prices against demeaned sales for the brand with the most observations. Simultaneously we will plot also the data for the brand with the highest Total Revenue, in order to see if there is a difference between cases.
+*Note* : We will use the results from the point 1.a for the brand with the highest Total Revenue. 
+
+```{r, include=TRUE}
+# Scatter plot for the brand with the most observations after demeaned sales and price
+p1 <- ggplot(demean_bigBrand, aes(x = Sales, y = Price)) + geom_point() +
+      geom_smooth(method='lm', formula= y~x) +
+      ggtitle("Brand with the most observations.(After Demean)")
+      
+
+# Scatter plot for the brand with the higest Total Revenue (From point 1.a)
+p2 <- ggplot(subset(data, brand == "P_MILLER_GENUINE_DRAFT"), aes(x = Sales, y = Price)) + geom_point() +
+  geom_smooth(method='lm', formula= y~x) +
+  ggtitle("Brand with the highest TR")
+
+# Plot 2 graphs in the same window
+ggarrange(p1, p2,
+          ncol = 1, nrow = 2)
+```
+
+From the graphs above, We can clearly see the difference in the result. First, we notice that 'P_MILLER_GENUINE_DRAFT' is the brand with the most of the most observations and with the highest Total Revenue in the same time.
+The two graphs significantly differ from each other. In the first graph we can see that the observations are more concentrated on the X-axis, close to zero, and also very concentrated to each-other.
+By demeaning the sales and prices, a linear regression with these variables will be a fixed effects model, i.e. a model that shows the effect of a variable while keeping all observed and unobserved time constant.
+We can notice another significant difference between two graphs. Before demeaning the data as shown in the graph above (Brand with the highest TR Graph), we can notice that the regression line is positive and increasing. After demeaning the sales and prices, the fitted line was transformed into decreasing (After Demean Graph), which simultaneously shows the demand curve for the brand with the most observations.
+
+### Task 1.D
+
+In this task we will add a quadratic line to the graph from task 1.C .
+Different from the linear fitted line, the quadratic line shows a positive relationship between price and sales for the brand with the highest TR.
+The straight fitted line represents the demand curve for the brand with the most of observations.
+
+```{r, include=TRUE}
+### Add a quadratic line to the graph from the task C
+ggplot(demean_bigBrand, aes(x = Sales, y = Price)) + geom_point() + 
+  geom_smooth(method='lm', formula= y~x) +
+  geom_smooth(method='lm', formula= y~x+I(x^2)) +
+  ggtitle("Brand with the most observations, after demean")
+```
+
+### Task 1.E
+
+First, let's take the logs for the price and sales for the brand with the most observations.
+
+```{r, include=TRUE}
+# Log Sales
+big_brand$log_sales <- log(big_brand$Sales)
+# Log Price
+big_brand$log_price <- log(big_brand$Price)
+```
+
+Let's regress the log of Sales on log of Prices. By operating log transformations on our variables, the result of the regress will be the elasticity of the demand. The coefficient shows the ratio of the percentage change in quantity demanded of a product to the percentage change in price.
+
+In our results, the coefficient is equal to 0.73, which indicates that demand is inelastic. We can interpret it as for a percentage increase in the price, the sales (demand) will increase by 0.73%.
+
+```{r, include=TRUE}
+# Basic Regression without identification Strategy
+feols(log_sales ~ log_price, data = big_brand)
+```
+
+We can construct some other regression models and try to improve the output coefficient.
+
+In the first regression model below we have added the UPC as a new variable in the model. Since the variable UPC is a categorical variable which shows the Unique Product Identification, we will use it as a factor variable in our analysis.
+
+In this case, the demand elasticity is equal to -4.99, smaller than -1. The demand is elastic, as a result MR will be smaller than 0. This makes possible MC=MR.
+We can assume that checking for each product within the brand with the highest TR, for a percentage increase in the price, the sales will decrease by 4.9%.
+Since UPC is a categorical variable coded as a dummy variable, a one unit difference represents switching from one product to the other.
+
+```{r, include=TRUE}
+# All upc, with upc dummies
+feols(log_sales ~ log_price + factor(upc), data = big_brand)
+```
+
+Using the same model, we can add the Margin as a new explanatory variable.
+In this model we will control the change on sales given the prices, checking for each type of product and including the average margin.
+As a result, the demand is elastic and equal to -4.07.
+
+In our case, for 1% increase in the price of the good, the sales will decrease by 4%.
+Regarding the average margin, for 1% increase in the margin, the sales will decrease by 0.1% if the price remains constant.
+Since UPC is a categorical variable coded as a dummy variable, a one unit difference represents switching from one product to the other.
+
+```{r, include=TRUE}
+feols(log_sales ~ log_price + margin + factor(upc), data = big_brand)
+```
+
+## Exercise 2
+
+In order to solve this task, we will use an Identification Strategy: Instrumental Regression. When using this strategy is very important to define the right instrument.
+An instrumental variable is a third variable, Z, used in regression analysis when we have endogenous variables — variables that are influenced by other variables in the model. In other words, we use it to account for unexpected behavior between variables. Using an instrumental variable to identify the hidden (unobserved) correlation allows us to see the true correlation between the explanatory variable and response variable, Y.
+
+The 2 main requirements of an IV:
+1) they can’t correlate with the error (exogeneity)
+2) they do correlate with X (explanatory variable).
+
+### Task 2.A
+
+In this task, first we will calculate the number of stores in each city using the code below. The city with the largest number of stores is Chicago, by 451,464 stores.
+
+```{r, include=TRUE}
+# Assign log of prices and log of sales in the data set
+data$log_sales <- log(data$Sales) 
+data$log_price <- log(data$Price)
+
+# Group data by each city and count the stores per each city
+# Note: Here, few cities will not be grouped because we also
+# need to group stores within cities
+gr_by_city <- data %>%
+  group_by(city) %>%
+  count(store, sort = TRUE)
+
+# Summarize the total number of stores per each city
+n_stores <- gr_by_city %>%
+  group_by(city) %>%
+  summarise(n_store = sum(n))
+n_stores <- as.data.frame(n_stores)
+
+head(arrange(n_stores, desc(n_store))) # Chicago has the highest number of stores
+# 451464 stores
+
+# Create a test data frame identical to the original data frame
+df <- data
+
+# Add number of stores corresponding to each city as a new column in the data
+df <- left_join(df, n_stores, by = 'city')
+df <- as.data.frame(df)
+```
+
+Here we will perform the regression of log of prices in number of stores.
+
+```{r, include=TRUE}
+# Regress log of prices on number of stores
+feols(log_price ~ n_store, data = df)
+```
+
+The value of the slope (n_store) for the regression is equal to -0.000000117, very close to zero. This means that our instrument is weakly negatively correlated with the log of prices, which in our case will be the explanatory variable for the Instrumental Regression. As a result, this instrument doesn't complete the first requirement for the IV.
+There is no way to test using the data if our instrument is plausible.
+
+### Task 2.B
+
+Before applying the Instrument Regression, let's perform regression of log of prices in log of sales.
+
+```{r, include=TRUE}
+feols(log_sales~log_price, data = df)
+```
+
+The regression coefficient is 0.03, which shows that the demand is inelastic. In order to prove that this result is true, and prove that there is not other external factors affecting our results, we will use Identification Strategy: Instrumental Regression.
+
+Below we will perform the IR using two stages and residuals from the first stage. The instrument will be the number of stores in each city.
+
+```{r, include=TRUE}
+###  IDENTIFICATION STRATEGY: INSTRUMENTAL REGRESSION
+
+# First Stage
+feols(log_price ~ n_store, data = df) 
+
+# save residuals from first stage
+IV_first_stage = feols(log_price ~ n_store, data = df) 
+df$log_price_pred = IV_first_stage$fitted.values
+
+# Second Stage
+feols(log_sales ~ log_price_pred, data = df)
+```
+
+As a result, we have the regression coefficient equal to -3.48, which means the demand is elastic. Clearly the instrument improved our results, since before the results showed inelastic demand. This means that considering the number of stores in a city, when prices increase by 1%, the quantity will decrease by -3.4%.
+
+## Exercise 3
+
+The task requires us to find the product (UPC) with the highest and lowest total revenue.
+First, we will calculate the total revenue for each product by multiplying price with the amount sold. In the next step we will group the data by each UPC and find the Total Revenue for each of them.
+As a result, the product with the highest revenue is: 3410057306, with TR equal to $6,539,291 .
+The product with the lowest revenue is: 7199030001, with TR equal to $4,756 .
+
+```{r, include=TRUE}
+# Calculate the total revenue for each product
+data$total_revenue <- data$Sales * data$Price
+
+# Group data by each UPC
+# Sum the total revenue for each upc in order to find the total revenue for each of them
+upc_tr <- data %>% 
+           group_by(upc) %>%
+           summarise(TR = sum(total_revenue))
+# The highest total revenue
+# upc: 3410057306, TR: 6539291
+head(arrange(upc_tr, desc(TR)))
+
+# The lowest total revenue
+# upc: 7199030001, TR: 4756.47
+head(arrange(upc_tr, TR))
+```
+
+### Task 3.A
+
+Using the information above we will regress the log of Sales and log of Prices for each of the products we found.
+
+First, let's perform the regression for the product with the highest TR.
+
+```{r, include=TRUE}
+# Regress for the upc with highest revenue
+feols(log_sales ~ log_price, data = subset(data,upc == 3410057306))
+```
+
+Then let's perform the regress for the product with the lowest TR.
+
+```{r, include=TRUE}
+# Regress for the upc with the lowest revenue
+feols(log_sales ~ log_price, data = subset(data,upc == 7199030001))
+```
+
+Before interpreting the results, here we count the units sold for each of the two products.
+
+```{r}
+# Units sold for product with lowest TR
+low_tr <- subset(data,upc == 7199030001)
+low_tr %>%
+  count(upc)
+
+# Units for the product with highest TR
+high_tr <- subset(data,upc == 3410057306)
+high_tr %>%
+  count(upc)
+```
+
+From the results above, we can see the difference in the results of the regression. For the UPC with highest TR we have the demand elasticity equal to -4.7 while for the product with the lowest TR the demand elasticity is -1.2. For both cases demand is elastic, but the demand for the product with the highest TR is more elastic.
+In this case one of the factors that could determine the demand elasticity for the product could be price level, the type of product and the availability of any potential substitutes.
+High-priced products often are highly elastic because, if prices fall, consumers are likely to buy at a lower price.
+Compared to essential goods, luxury items are highly elastic.
+In our case, the product with the highest TR has relatively higher prices compared to the other product. Furthermore, there are sold 14,778 units of that product, compared to 1,321 for the product with the lowest TR. 
+
+### Task 3.B
+
+For each of the two products, create a graph which plots 1) prices against wales in zip-codes with above median unemployment levels (in one color), and 2) prices against sales in zip-codes with below median unemployment levels (in another color). For both type of zip-codes, fit a linear line into the data plot.
+
+We will calculate the unemployment median.
+The unemployment median is equal to 0.18 . This midpoint value for unemployment is the point at which half the observations are above the value and half the observations are below the value.
+
+```{r, include=TRUE}
+# Find the median for the unemployment variable
+med <- median(sort(data$unemp), na.rm = TRUE)
+```
+
+In this code chunk we will construct the graphs for the prices and sales in the zip-codes with below and above the median unemployment levels.
+
+Below is shown the graph for the product with the highest TR.
+
+```{r, include=TRUE}
+test1 <- subset(data, upc == 3410057306)
+test1 <- na.omit(test1)
+test1$zip_code <- ifelse(test1$unemp <= med, 'unemployment below median', 'unemployment over median')
+
+
+ggplot(test1, aes(x=Sales, y=Price, color = zip_code, shape = zip_code)) + 
+  geom_point(size=2) +
+  geom_smooth(method='lm') +
+  scale_color_manual(values=c('#E69F00', '#56B4E9')) +
+  ggtitle("The product with the highest TR")
+```
+
+Below is illustrated the graph for the product with the lowest TR.
+
+```{r, include=TRUE}
+test2 <- subset(data, upc == 7199030001)
+test2 <- na.omit(test2)
+test2$zip_code <- ifelse(test2$unemp <= med, 'unemployment below median', 'unemployment over median')
+
+ggplot(test2, aes(x=Sales, y=Price, color = zip_code, shape = zip_code)) + 
+  geom_point(size=2) +
+  geom_smooth(method='lm') +
+  scale_color_manual(values=c('#E69F00', '#56B4E9')) +
+  ggtitle('Product with lowest TR')
+```
+
+### Task 3.C
+
+In the graphs plotted above, the fitted line on each of the graphs shows the demand curve for the product.
+Let's consider the first graph. There are plotted the sales and prices for the product with the highest TR, separated on two categories, for those zip-codes where unemployment is above median and below median. The fitted line shows the demand curve for the product based on the zip-code category related to the unemployment.
+
+There is a detail in both of the graphs which shows that demand curve for the products in zip-codes with unemployment below median is more steep, as a result it is more inelastic, compared to the zip-codes with unemployment over median.
+
+The main difference between two graphs is the steepness of the demand curves.
+Since the demand curve of the product with the lowest TR is more steep than that of the UPC with the highest TR, it is more elastic when we analyse for the zip-code areas and unemployment.
+
+## Exercise 4
+
+In this section we will calculate the demand elasticity for each product. The calculations will be used in order to solve the following tasks for this exercise.
+
+```{r, include=TRUE}
+## Product Elasticity
+
+# Calculate the Demand Elasticity coefficient for each upc (product)
+data <- as.data.table(data)
+reg_coeffs <- data[,coef(lm(log_sales~log_price)),by=upc] # For each upc, the first element shows the intercept,
+                                                          # the second shows the slope (the coeff we are interested)
+
+row_odd <- seq_len(nrow(reg_coeffs)) %% 2       # Create row indicator
+product_elasticities <- reg_coeffs[row_odd == 0, ]    # Subset even rows to get regress coefficients
+
+# Calculate average margin per each product
+avg_margin <- data[,mean(margin),by=upc]
+
+# Assign average margins to each upc, paralell to their demand elasticity coefficient
+product_elasticities$avg_margin <- avg_margin$V1
+colnames(product_elasticities) <- c('upc', 'demand_elasticity', 'avg_margin')
+#head(product_elasticities)
+```
+
+### Task 4.A
+
+In this section, we will plot the average margins against the demand elasticities we calculated in the previous task. In addition we will fit a linear line into the plot.
+
+The profit margin or “mark-up” can be measured by the difference between price per unit (AR) and cost per unit (AC). When demand is highly price elastic then the profit margin tends to be low. This is because consumers are likely to be more price sensitive.
+In our case, there is a positive linear relationship between average margin and demand elasticity. This result is not consistent with the microeconomic theory.
+
+```{r, include=TRUE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Plot Average Margin vs Demand Elasticity
+# Remove outlier
+# The outlier is value -214, the min for the demand elasticity
+pe <- product_elasticities %>% filter(demand_elasticity > -214)
+
+# Plot Average Margin vs Demand Elasticity
+ggplot(pe, aes(x=avg_margin, y=demand_elasticity)) + 
+  geom_point(size=2) +
+  geom_smooth(method='lm') +
+  ggtitle('Average Margin vs Demand Elasticity')
+```
+
+### Task 4.B
+
+Calculate the Lerner Index for each product based on its demand elasticity estimate, and plot it against the average margin of the product. Is the result as you expect?
+
+In this task we will calculate the Lerner Index for each product. We know the formula
+for the Lerner Index: Lerner Index = - 1/demand_elasticity.
+We will make the calculations for the Lerner Index in the same way using the formula.
+
+```{r, include=TRUE}
+# Calculate Lerner Index: -1/demand_elasticity
+product_elasticities$lerner_index <- -(1/product_elasticities$demand_elasticity)
+pe$lerner_index <- -(1/pe$demand_elasticity)
+```
+
+Let's plot the Lerner Index against Average Margin of product.
+
+Essentially, the Lerner Index measures the percentage markup that a firm is able to charge over its marginal cost. The index ranges from a low value of 0 to a high of 1. The higher the value of the Lerner index, the more the firm is able to charge over its marginal cost, hence the greater its monopoly power.
+In our case, there is a positive relationship between average margin and lerner index. This means that when the average margin increases, the Lerner Index also increases.
+
+```{r, include=TRUE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+# Remove outlier
+# The outlier is value -25, the min for the lerner index
+pe <- product_elasticities %>% filter(lerner_index > -25)
+
+# Plot Average Margin vs Lerner Index
+ggplot(pe, aes(x=avg_margin, y=lerner_index)) + 
+  geom_point(size=2) +
+  geom_smooth(method='lm') +
+  ggtitle('Average Margin vs Lerner Index')
+```
+
+### Task 4.C
+
+In this task we will plot the Lerner Index for each product against the average price for the product, using the code chunk below.
+
+First, we need to calculate average price for each product.
+
+```{r, include=TRUE}
+# Calculate average price per each product
+avg_price <- data[,mean(Price),by=upc]
+
+# Assign average prices to each upc, paralell to their elasticity and avg margin
+product_elasticities$avg_price <- avg_price$V1
+```
+
+After we did the calculations for the average price, we will plot the results against the Lerner Index for each of the products.
+From the result, we can see that the fitted line is close to be perfectly horizontal but it's slope is too small and positive.This means that there is a weak positive relationship between the Lerner Index and the price averages.
+
+```{r, include=TRUE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# Remove outlier
+# The outlier is value -25, the min for the lerner index
+pe <- product_elasticities %>% filter(lerner_index > -25)
+
+# Regress Analysis
+rrr <- lm(lerner_index~avg_price, data = product_elasticities)
+summary(rrr)
+
+# Plot the Average Prices vs Lerner Index
+ggplot(pe, aes(x=avg_price, y=lerner_index)) + 
+  geom_point(size=2) +
+  geom_smooth(method='lm') +
+  ggtitle('Average Price vs Lerner Index')
+```
